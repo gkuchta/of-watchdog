@@ -34,7 +34,7 @@ func main() {
 
 	requestHandler := buildRequestHandler(watchdogConfig)
 
-	log.Printf("OperationalMode: %s\n", config.WatchdogMode(watchdogConfig.OperationalMode))
+	//log.Printf("OperationalMode: %s\n", config.WatchdogMode(watchdogConfig.OperationalMode))
 
 	if err := lock(); err != nil {
 		log.Panic(err.Error())
@@ -60,6 +60,12 @@ func buildRequestHandler(watchdogConfig config.WatchdogConfig) http.HandlerFunc 
 	case config.ModeHTTP:
 		requestHandler = makeHTTPRequestHandler(watchdogConfig)
 		break
+	case config.ModeTargetHTTP:
+		requestHandler = makeTargetHTTPRequestHandler(watchdogConfig)
+		break
+	case config.ModeTargetStreaming:
+		requestHandler = makeTargetForkRequestHandler(watchdogConfig)
+		break
 	default:
 		log.Panicf("unknown watchdog mode: %d", watchdogConfig.OperationalMode)
 		break
@@ -70,7 +76,7 @@ func buildRequestHandler(watchdogConfig config.WatchdogConfig) http.HandlerFunc 
 
 func lock() error {
 	lockFile := filepath.Join(os.TempDir(), ".lock")
-	log.Printf("Writing lock file at: %s", lockFile)
+	//log.Printf("Writing lock file at: %s", lockFile)
 	return ioutil.WriteFile(lockFile, nil, 0600)
 
 }
@@ -220,5 +226,64 @@ func makeHTTPRequestHandler(watchdogConfig config.WatchdogConfig) func(http.Resp
 			w.Write([]byte(err.Error()))
 		}
 
+	}
+}
+
+func makeTargetHTTPRequestHandler(watchdogConfig config.WatchdogConfig) func(http.ResponseWriter, *http.Request) {
+	commandName, arguments := watchdogConfig.Process()
+	functionInvoker := executor.HTTPTargetFunctionRunner{
+		Process:     commandName,
+		ProcessArgs: arguments,
+	}
+
+	//fmt.Printf("Forking - %s %s\n", commandName, arguments)
+	functionInvoker.Start()
+
+	return func(w http.ResponseWriter, r *http.Request) {
+
+		req := executor.FunctionRequest{
+			Process:      commandName,
+			ProcessArgs:  arguments,
+			InputReader:  r.Body,
+			OutputWriter: w,
+		}
+
+		err := functionInvoker.Run(req, r.ContentLength, r, w)
+
+		if err != nil {
+			w.WriteHeader(500)
+			w.Write([]byte(err.Error()))
+		}
+
+	}
+}
+
+func makeTargetForkRequestHandler(watchdogConfig config.WatchdogConfig) func(http.ResponseWriter, *http.Request) {
+	functionInvoker := executor.TargetForkFunctionRunner{
+		ExecTimeout: watchdogConfig.ExecTimeout,
+	}
+
+	return func(w http.ResponseWriter, r *http.Request) {
+
+		var environment []string
+
+		if watchdogConfig.InjectCGIHeaders {
+			environment = getEnvironment(r)
+		}
+
+		commandName, arguments := watchdogConfig.Process()
+		req := executor.FunctionRequest{
+			Process:      commandName,
+			ProcessArgs:  arguments,
+			InputReader:  r.Body,
+			OutputWriter: w,
+			Environment:  environment,
+		}
+
+		w.Header().Set("Content-Type", watchdogConfig.ContentType)
+		err := functionInvoker.Run(req)
+		if err != nil {
+			log.Println(err.Error())
+		}
 	}
 }

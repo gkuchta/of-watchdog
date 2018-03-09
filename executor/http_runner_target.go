@@ -1,9 +1,10 @@
 package executor
 
 import (
+	"bytes"
+	"fmt"
 	"io"
 	"io/ioutil"
-	"log"
 	"net"
 	"net/http"
 	"net/url"
@@ -11,10 +12,11 @@ import (
 	"os/exec"
 	"sync"
 	"time"
+
+	logger "github.com/sirupsen/logrus"
 )
 
-// HTTPFunctionRunner creates and maintains one process responsible for handling all calls
-type HTTPFunctionRunner struct {
+type HTTPTargetFunctionRunner struct {
 	Process     string
 	ProcessArgs []string
 	Command     *exec.Cmd
@@ -27,7 +29,7 @@ type HTTPFunctionRunner struct {
 }
 
 // Start forks the process used for processing incoming requests
-func (f *HTTPFunctionRunner) Start() error {
+func (f *HTTPTargetFunctionRunner) Start() error {
 	cmd := exec.Command(f.Process, f.ProcessArgs...)
 
 	var stdinErr error
@@ -46,42 +48,43 @@ func (f *HTTPFunctionRunner) Start() error {
 
 	errPipe, _ := cmd.StderrPipe()
 
+	logger.SetFormatter(&logger.JSONFormatter{})
 	// Prints stderr to console and is picked up by container logging driver.
+
 	go func() {
-		log.Println("Started logging stderr from function.")
 		for {
 			errBuff := make([]byte, 256)
 
 			_, err := errPipe.Read(errBuff)
 			if err != nil {
-				log.Fatalf("Error reading stderr: %s", err)
+				logger.Fatal(fmt.Sprintf("Error reading from STDERR: %s", err))
 			} else {
-				log.Printf("stderr: %s", errBuff)
+				errBuff = bytes.Trim(errBuff, "\x000")
+				logger.Warn(string(errBuff[:]))
 			}
 		}
 	}()
 
 	go func() {
-		log.Println("Started logging stdout from function.")
 		for {
 			errBuff := make([]byte, 256)
 
 			_, err := f.StdoutPipe.Read(errBuff)
 			if err != nil {
-				log.Fatalf("Error reading stdout: %s", err)
-
+				logger.Fatal(fmt.Sprintf("Error reading from STDOUT: %s", err))
 			} else {
-				log.Printf("stdout: %s", errBuff)
+				errBuff = bytes.Trim(errBuff, "\x000")
+				logger.Info(string(errBuff[:]))
 			}
 		}
 	}()
 
 	dialTimeout := 3 * time.Second
-	f.Client = makeProxyClient(dialTimeout)
+	f.Client = makeProxyClientTarget(dialTimeout)
 
 	urlValue, upstreamURLErr := url.Parse(os.Getenv("upstream_url"))
 	if upstreamURLErr != nil {
-		log.Fatal(upstreamURLErr)
+		logger.Fatal(upstreamURLErr)
 	}
 
 	f.UpstreamURL = urlValue
@@ -90,7 +93,7 @@ func (f *HTTPFunctionRunner) Start() error {
 }
 
 // Run a function with a long-running process with a HTTP protocol for communication
-func (f *HTTPFunctionRunner) Run(req FunctionRequest, contentLength int64, r *http.Request, w http.ResponseWriter) error {
+func (f *HTTPTargetFunctionRunner) Run(req FunctionRequest, contentLength int64, r *http.Request, w http.ResponseWriter) error {
 
 	request, _ := http.NewRequest(r.Method, f.UpstreamURL.String(), r.Body)
 	for h := range r.Header {
@@ -100,7 +103,7 @@ func (f *HTTPFunctionRunner) Run(req FunctionRequest, contentLength int64, r *ht
 	res, err := f.Client.Do(request)
 
 	if err != nil {
-		log.Println(err)
+		logger.Warn(err)
 	}
 
 	for h := range res.Header {
@@ -112,17 +115,16 @@ func (f *HTTPFunctionRunner) Run(req FunctionRequest, contentLength int64, r *ht
 		defer res.Body.Close()
 		bodyBytes, bodyErr := ioutil.ReadAll(res.Body)
 		if bodyErr != nil {
-			log.Println("read body err", bodyErr)
+			logger.Warn(fmt.Sprintf("read body err %s", bodyErr))
 		}
 		w.Write(bodyBytes)
 	}
 
-	log.Printf("%s %s - %s - ContentLength: %d", r.Method, r.RequestURI, res.Status, res.ContentLength)
-
 	return nil
+
 }
 
-func makeProxyClient(dialTimeout time.Duration) *http.Client {
+func makeProxyClientTarget(dialTimeout time.Duration) *http.Client {
 	proxyClient := http.Client{
 		Transport: &http.Transport{
 			Proxy: http.ProxyFromEnvironment,

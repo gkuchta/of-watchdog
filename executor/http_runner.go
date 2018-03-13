@@ -1,10 +1,10 @@
 package executor
 
 import (
+	"bytes"
 	"context"
 	"io"
 	"io/ioutil"
-	"log"
 	"net"
 	"net/http"
 	"net/url"
@@ -12,26 +12,33 @@ import (
 	"os/exec"
 	"sync"
 	"time"
+
+	log "github.com/sirupsen/logrus"
 )
 
 // HTTPFunctionRunner creates and maintains one process responsible for handling all calls
 type HTTPFunctionRunner struct {
-	ExecTimeout  time.Duration // ExecTimeout the maxmium duration or an upstream function call
-	ReadTimeout  time.Duration
-	WriteTimeout time.Duration
-	Process      string
-	ProcessArgs  []string
-	Command      *exec.Cmd
-	StdinPipe    io.WriteCloser
-	StdoutPipe   io.ReadCloser
-	Stderr       io.Writer
-	Mutex        sync.Mutex
-	Client       *http.Client
-	UpstreamURL  *url.URL
+	ExecTimeout        time.Duration // ExecTimeout the maxmium duration or an upstream function call
+	ReadTimeout        time.Duration
+	WriteTimeout       time.Duration
+	Process            string
+	ProcessArgs        []string
+	Command            *exec.Cmd
+	StdinPipe          io.WriteCloser
+	StdoutPipe         io.ReadCloser
+	Stderr             io.Writer
+	Mutex              sync.Mutex
+	Client             *http.Client
+	UpstreamURL        *url.URL
+	LogBufferSizeBytes int
+	LogLevel           log.Level
 }
 
 // Start forks the process used for processing incoming requests
 func (f *HTTPFunctionRunner) Start() error {
+	log.SetFormatter(&log.JSONFormatter{})
+	log.SetLevel(f.LogLevel)
+
 	cmd := exec.Command(f.Process, f.ProcessArgs...)
 
 	var stdinErr error
@@ -52,31 +59,30 @@ func (f *HTTPFunctionRunner) Start() error {
 
 	// Prints stderr to console and is picked up by container logging driver.
 	go func() {
-		log.Println("Started logging stderr from function.")
 		for {
-			errBuff := make([]byte, 256)
+			errBuff := make([]byte, f.LogBufferSizeBytes)
 
 			_, err := errPipe.Read(errBuff)
 			if err != nil {
 				log.Fatalf("Error reading stderr: %s", err)
-
 			} else {
-				log.Printf("stderr: %s", errBuff)
+				errBuff = bytes.Trim(errBuff, "\x000")
+				log.Errorf("%s", string(errBuff[:]))
 			}
 		}
 	}()
 
 	go func() {
-		log.Println("Started logging stdout from function.")
 		for {
-			errBuff := make([]byte, 256)
+			errBuff := make([]byte, f.LogBufferSizeBytes)
 
 			_, err := f.StdoutPipe.Read(errBuff)
 			if err != nil {
 				log.Fatalf("Error reading stdout: %s", err)
 
 			} else {
-				log.Printf("stdout: %s", errBuff)
+				errBuff = bytes.Trim(errBuff, "\x000")
+				log.Infof("%s", string(errBuff[:]))
 			}
 		}
 	}()
@@ -106,12 +112,11 @@ func (f *HTTPFunctionRunner) Run(req FunctionRequest, contentLength int64, r *ht
 	res, err := f.Client.Do(request.WithContext(ctx))
 
 	if err != nil {
-		log.Printf("Upstream HTTP request error: %s\n", err.Error())
+		log.Errorf("Upstream HTTP request error: %s", err.Error())
 
 		// Error unrelated to context / deadline
 		if ctx.Err() == nil {
 			w.WriteHeader(http.StatusInternalServerError)
-
 			return nil
 		}
 
@@ -120,8 +125,7 @@ func (f *HTTPFunctionRunner) Run(req FunctionRequest, contentLength int64, r *ht
 			{
 				if ctx.Err() != nil {
 					// Error due to timeout / deadline
-					log.Printf("Upstream HTTP killed due to exec_timeout: %s\n", f.ExecTimeout)
-
+					log.Errorf("Upstream HTTP killed due to exec_timeout: %s", f.ExecTimeout)
 					w.WriteHeader(http.StatusGatewayTimeout)
 					return nil
 				}
@@ -142,12 +146,12 @@ func (f *HTTPFunctionRunner) Run(req FunctionRequest, contentLength int64, r *ht
 		defer res.Body.Close()
 		bodyBytes, bodyErr := ioutil.ReadAll(res.Body)
 		if bodyErr != nil {
-			log.Println("read body err", bodyErr)
+			log.Errorf("read body err: %s", bodyErr)
 		}
 		w.Write(bodyBytes)
 	}
 
-	log.Printf("%s %s - %s - ContentLength: %d", r.Method, r.RequestURI, res.Status, res.ContentLength)
+	log.Debugf("%s %s - %s - ContentLength: %d", r.Method, r.RequestURI, res.Status, res.ContentLength)
 
 	return nil
 }

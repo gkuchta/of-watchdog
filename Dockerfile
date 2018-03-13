@@ -10,6 +10,7 @@ COPY executor   executor
 # Run a gofmt and exclude all vendored code.
 RUN test -z "$(gofmt -l $(find . -type f -name '*.go' -not -path "./vendor/*"))"
 
+RUN go get -d -v ./...
 RUN go test -v ./...
 
 # Stripping via -ldflags "-s -w" 

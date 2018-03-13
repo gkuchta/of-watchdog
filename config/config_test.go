@@ -23,22 +23,6 @@ func Test_OperationalMode_Default(t *testing.T) {
 	}
 }
 
-func Test_OperationalMode_AfterBurn(t *testing.T) {
-	env := []string{
-		"mode=afterburn",
-	}
-
-	actual, err := New(env)
-	if err != nil {
-		t.Errorf("Expected no errors")
-	}
-
-	if actual.OperationalMode != ModeAfterBurn {
-		t.Errorf("Want %s. got: %s", WatchdogMode(ModeAfterBurn), WatchdogMode(actual.OperationalMode))
-	}
-
-}
-
 func Test_ContentType_Default(t *testing.T) {
 	env := []string{}
 

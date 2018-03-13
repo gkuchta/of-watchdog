@@ -23,10 +23,6 @@ func WatchdogModeConst(mode string) int {
 	switch mode {
 	case "streaming":
 		return ModeStreaming
-	case "afterburn":
-		return ModeAfterBurn
-	case "serializing":
-		return ModeSerializing
 	case "http":
 		return ModeHTTP
 	case "target-http":
@@ -43,10 +39,6 @@ func WatchdogMode(mode int) string {
 	switch mode {
 	case ModeStreaming:
 		return "streaming"
-	case ModeAfterBurn:
-		return "afterburn"
-	case ModeSerializing:
-		return "serializing"
 	case ModeHTTP:
 		return "http"
 	case ModeTargetHTTP:

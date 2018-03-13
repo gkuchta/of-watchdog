@@ -1,3 +1,7 @@
+# TODO
+
+Rewrite readme; make sure it's obvious that this code is a heavily modified version of upstream so we comply with the MIT license.
+
 # of-watchdog
 
 This is a re-write of the OpenFaaS watchdog.

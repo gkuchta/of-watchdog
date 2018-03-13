@@ -5,6 +5,8 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	log "github.com/sirupsen/logrus"
 )
 
 // WatchdogConfig configuration for a watchdog.
@@ -14,10 +16,12 @@ type WatchdogConfig struct {
 	HTTPWriteTimeout time.Duration
 	ExecTimeout      time.Duration
 
-	FunctionProcess  string
-	ContentType      string
-	InjectCGIHeaders bool
-	OperationalMode  int
+	FunctionProcess    string
+	ContentType        string
+	InjectCGIHeaders   bool
+	OperationalMode    int
+	LogBufferSizeBytes int
+	LogLevel           log.Level
 }
 
 // Process returns a string for the process and a slice for the arguments from the FunctionProcess.
@@ -33,7 +37,7 @@ func (w WatchdogConfig) Process() (string, []string) {
 
 // New create config based upon environmental variables.
 func New(env []string) (WatchdogConfig, error) {
-
+	log.SetFormatter(&log.JSONFormatter{})
 	envMap := mapEnv(env)
 
 	var functionProcess string
@@ -51,14 +55,16 @@ func New(env []string) (WatchdogConfig, error) {
 	}
 
 	config := WatchdogConfig{
-		TCPPort:          getInt(envMap, "port", 8080),
-		HTTPReadTimeout:  getDuration(envMap, "read_timeout", time.Second*10),
-		HTTPWriteTimeout: getDuration(envMap, "write_timeout", time.Second*10),
-		FunctionProcess:  functionProcess,
-		InjectCGIHeaders: true,
-		ExecTimeout:      getDuration(envMap, "exec_timeout", time.Second*10),
-		OperationalMode:  ModeStreaming,
-		ContentType:      contentType,
+		TCPPort:            getInt(envMap, "port", 8080),
+		HTTPReadTimeout:    getDuration(envMap, "read_timeout", time.Second*10),
+		HTTPWriteTimeout:   getDuration(envMap, "write_timeout", time.Second*10),
+		FunctionProcess:    functionProcess,
+		InjectCGIHeaders:   true,
+		ExecTimeout:        getDuration(envMap, "exec_timeout", time.Second*10),
+		OperationalMode:    ModeStreaming,
+		ContentType:        contentType,
+		LogBufferSizeBytes: getInt(envMap, "buffer_size", 1024),
+		LogLevel:           getLogLevel(envMap, "log_level"),
 	}
 
 	if val := envMap["mode"]; len(val) > 0 {
@@ -89,7 +95,6 @@ func getDuration(env map[string]string, key string, defaultValue time.Duration) 
 		result = parsed
 
 	}
-
 	return result
 }
 
@@ -98,8 +103,26 @@ func getInt(env map[string]string, key string, defaultValue int) int {
 	if val, exists := env[key]; exists {
 		parsed, _ := strconv.Atoi(val)
 		result = parsed
-
 	}
 
 	return result
+}
+
+func getLogLevel(env map[string]string, key string) log.Level {
+	level := "info"
+	if val, exists := env[key]; exists {
+		level = strings.ToLower(val)
+	}
+	switch level {
+	case "info":
+		return log.InfoLevel
+	case "debug":
+		return log.DebugLevel
+	case "error":
+		return log.ErrorLevel
+	default:
+		log.Errorf("Unknown log_level - defaulting to INFO")
+		return log.InfoLevel
+	}
+
 }

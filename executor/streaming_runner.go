@@ -1,11 +1,12 @@
 package executor
 
 import (
-	"fmt"
+	"bytes"
 	"io"
-	"log"
 	"os/exec"
 	"time"
+
+	log "github.com/sirupsen/logrus"
 )
 
 // FunctionRunner runs a function
@@ -26,12 +27,15 @@ type FunctionRequest struct {
 
 // ForkFunctionRunner forks a process for each invocation
 type ForkFunctionRunner struct {
-	ExecTimeout time.Duration
+	ExecTimeout        time.Duration
+	LogBufferSizeBytes int
+	LogLevel           log.Level
 }
 
 // Run run a fork for each invocation
 func (f *ForkFunctionRunner) Run(req FunctionRequest) error {
-	log.Printf("Running %s", req.Process)
+	log.SetFormatter(&log.JSONFormatter{})
+	log.SetLevel(f.LogLevel)
 	start := time.Now()
 	cmd := exec.Command(req.Process, req.ProcessArgs...)
 	cmd.Env = req.Environment
@@ -42,11 +46,10 @@ func (f *ForkFunctionRunner) Run(req FunctionRequest) error {
 
 		go func() {
 			<-timer.C
-
-			log.Printf("Function was killed by ExecTimeout: %s\n", f.ExecTimeout.String())
+			log.Errorf("Function was killed by ExecTimeout: %s", f.ExecTimeout.String())
 			killErr := cmd.Process.Kill()
 			if killErr != nil {
-				fmt.Println("Error killing function due to ExecTimeout", killErr)
+				log.Errorf("Error killing function due to ExecTimeout: %s", killErr)
 			}
 		}()
 	}
@@ -66,19 +69,19 @@ func (f *ForkFunctionRunner) Run(req FunctionRequest) error {
 
 	// Prints stderr to console and is picked up by container logging driver.
 	go func() {
-		log.Println("Started logging stderr from function.")
 		for {
-			errBuff := make([]byte, 256)
+			errBuff := make([]byte, f.LogBufferSizeBytes)
 
 			n, err := errPipe.Read(errBuff)
 			if err != nil {
 				if err != io.EOF {
-					log.Printf("Error reading stderr: %s", err)
+					log.Errorf("Error reading stderr: %s", err)
 				}
 				break
 			} else {
 				if n > 0 {
-					log.Printf("stderr: %s", errBuff)
+					errBuff = bytes.Trim(errBuff, "\x000")
+					log.Infof("%s", string(errBuff[:]))
 				}
 			}
 		}
@@ -92,7 +95,7 @@ func (f *ForkFunctionRunner) Run(req FunctionRequest) error {
 
 	waitErr := cmd.Wait()
 	done := time.Since(start)
-	log.Printf("Took %f secs", done.Seconds())
+	log.Debugf("Took %f secs", done.Seconds())
 	if timer != nil {
 		timer.Stop()
 	}

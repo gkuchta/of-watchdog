@@ -12,6 +12,10 @@ const (
 
 	//ModeHTTP for routing requests over HTTP
 	ModeHTTP = 4
+
+	ModeTargetHTTP = 5
+
+	ModeTargetStreaming = 6
 )
 
 // WatchdogModeConst as a const int
@@ -21,6 +25,10 @@ func WatchdogModeConst(mode string) int {
 		return ModeStreaming
 	case "http":
 		return ModeHTTP
+	case "target-http":
+		return ModeTargetHTTP
+	case "target-streaming":
+		return ModeTargetStreaming
 	default:
 		return 0
 	}
@@ -33,6 +41,10 @@ func WatchdogMode(mode int) string {
 		return "streaming"
 	case ModeHTTP:
 		return "http"
+	case ModeTargetHTTP:
+		return "target-http"
+	case ModeTargetStreaming:
+		return "target-streaming"
 	default:
 		return "unknown"
 	}

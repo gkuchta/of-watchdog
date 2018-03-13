@@ -118,8 +118,14 @@ func getLogLevel(env map[string]string, key string) log.Level {
 		return log.InfoLevel
 	case "debug":
 		return log.DebugLevel
+	case "warn":
+		return log.WarnLevel
 	case "error":
 		return log.ErrorLevel
+	case "fatal":
+		return log.FatalLevel
+	case "panic":
+		return log.PanicLevel
 	default:
 		log.Errorf("Unknown log_level - defaulting to INFO")
 		return log.InfoLevel
